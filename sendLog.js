@@ -1,7 +1,7 @@
 (function () {
   window.larsFriis = window.larsFriis || {};
 
-  window.larsFriis.sendLog = function (containerId) {
+  window.larsFriis.sendLog = function (containerId,event,consent) {
     const dataModel = window.google_tag_manager[containerId].dataLayer.get({
       split: function () {
         return [];
@@ -15,7 +15,8 @@
         ? "mobile"
         : "desktop",
       source: "client",
-      event: dataModel.event,
+      event: event,
+      consent: consent,
       datalayer: dataModel
     };
 
