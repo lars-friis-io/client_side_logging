@@ -1,9 +1,9 @@
 (function() {
 
   window.startDataLayerLogger = function(settings) {
-    // 🧩 Kræv settings med endpoint
-    if (!settings || !settings.endpoint) {
-      console.error('❌ startDataLayerLogger: "settings.endpoint" mangler');
+    // 🧩 Kræv settings
+    if (!settings) {
+      console.error('❌ startDataLayerLogger: "settings" mangler');
       return;
     }
 
