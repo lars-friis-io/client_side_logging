@@ -1,0 +1,80 @@
+(function() {
+
+  window.startDataLayerLogger = function(settings) {
+    // 🧩 Kræv settings med endpoint
+    if (!settings || !settings.endpoint) {
+      console.error('❌ startDataLayerLogger: "settings.endpoint" mangler');
+      return;
+    }
+
+    const endpoint = 'logging.larsfriis.io';
+    const dataset = settings.dataset || null;
+    const token = settings.token || null;
+    const location = settings.location || null;
+    const ignore_events = settings.ignore_events || [];
+    const buffer = [];
+
+    function shouldSkip(msg) {
+      // Skip GTM systemevents
+      if (msg?.event && msg.event.startsWith('gtm')) return true;
+
+      // Skip "set" kommandoer
+      if (msg && msg[0] === 'set') return true;
+
+      // Skip eventnavne i settings.ignore_events
+      if (msg?.event && ignore_events.includes(msg.event)) return true;
+
+      return false;
+    }
+
+    function queueEvent(dlEvent) {
+      if (shouldSkip(dlEvent)) return;
+
+      buffer.push({
+        page_location: window.location.href,
+        user_agent: navigator.userAgent,
+        device_type: /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+          ? 'mobile'
+          : 'desktop',
+        event: dlEvent?.event || 'message',
+        datalayer: dlEvent
+      });
+    }
+
+    function flush() {
+      if (!buffer.length) return;
+
+      // Global payload – metadata + events
+      const payload = {
+        dataset,
+        token,
+        events: buffer.splice(0, buffer.length)
+      };
+
+      navigator.sendBeacon(endpoint, JSON.stringify(payload));
+    }
+
+    // Fang eksisterende events
+    dataLayer.forEach(obj => {
+      if (obj && typeof obj === 'object') queueEvent(obj);
+    });
+
+    // Hook fremtidige pushes
+    const originalPush = dataLayer.push;
+    dataLayer.push = function() {
+      const args = Array.from(arguments);
+      const msg = args[0];
+      if (msg && typeof msg === 'object') queueEvent(msg);
+      return originalPush.apply(dataLayer, args);
+    };
+
+    // Flush ved sideskift eller tab-lukning
+    addEventListener('pagehide', flush);
+    addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flush();
+    });
+
+    console.log('✅ dataLayer beacon listener startet med settings:', settings);
+  };
+
+})();
