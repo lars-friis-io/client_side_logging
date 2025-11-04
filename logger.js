@@ -14,6 +14,7 @@
     function shouldSkip(msg) {
       if (msg?.event && msg.event.startsWith('gtm')) return true;
       if (msg && msg[0] === 'set') return true;
+      if (msg && msg[0] === 'consent') return true;
       if (msg?.event && ignore_events.includes(msg.event)) return true;
       return false;
     }
