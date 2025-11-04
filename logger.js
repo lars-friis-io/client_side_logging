@@ -33,16 +33,18 @@
       return obj;
     }
 
-    function addToBuffer(event_name, data) {
-      buffer.push({
+    function addToBuffer(event_name, data, extraFields = {}) {
+      const base = {
         page_location: window.location.href,
         user_agent: navigator.userAgent,
         device_type: /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
           ? 'mobile'
           : 'desktop',
         event: event_name,
+        ...extraFields,
         datalayer: sanitize(data || {}),
-      });
+      };
+      buffer.push(base);
     }
 
     function queueEvent(dlEvent) {
@@ -61,11 +63,11 @@
       if (cmp_log && dlEvent?.event === 'gtm.load') {
         if (cmp_cookie_val === undefined) {
           cmp_required = true;
-          const cookie_name = (document.cookie || '')
+          const cookie_list = (document.cookie || '')
             .split(';')
             .map(c => c.trim().split('=')[0])
             .filter(Boolean);
-          addToBuffer('consent_required', { cookie_name });
+          addToBuffer('consent_required', {}, { cookie_list });
         }
       }
     }
@@ -77,7 +79,7 @@
         dlEvent?.[1] === 'update' &&
         typeof dlEvent?.[2] === 'object'
       ) {
-        addToBuffer('consent_given', { consent: dlEvent[2] });
+        addToBuffer('consent_given', {}, { consent: dlEvent[2] });
         cmp_required = false;
       }
     }
