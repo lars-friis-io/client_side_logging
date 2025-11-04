@@ -1,29 +1,27 @@
-(function() {
-
-  window.startDataLayerLogger = function(settings) {
+(function () {
+  window.startDataLayerLogger = function (settings) {
     // 🧩 Kræv settings
     if (!settings) {
       console.error('❌ startDataLayerLogger: "settings" mangler');
       return;
     }
 
-    const endpoint = 'logging.larsfriis.io';
-    const dataset = settings.dataset || null;
-    const token = settings.token || null;
-    const location = settings.location || null;
+    // Endpoint til din Cloudflare Worker
+    const endpoint = settings.endpoint || 'https://logging.larsfriis.io';
+    const website_id = settings.website_id || null;
+    const secret = settings.secret || null;
     const ignore_events = settings.ignore_events || [];
     const buffer = [];
 
+    if (!website_id || !secret) {
+      console.error('❌ startDataLayerLogger: "website_id" eller "secret" mangler');
+      return;
+    }
+
     function shouldSkip(msg) {
-      // Skip GTM systemevents
       if (msg?.event && msg.event.startsWith('gtm')) return true;
-
-      // Skip "set" kommandoer
       if (msg && msg[0] === 'set') return true;
-
-      // Skip eventnavne i settings.ignore_events
       if (msg?.event && ignore_events.includes(msg.event)) return true;
-
       return false;
     }
 
@@ -37,36 +35,39 @@
           ? 'mobile'
           : 'desktop',
         event: dlEvent?.event || 'message',
-        datalayer: dlEvent
+        datalayer: dlEvent,
       });
     }
 
     function flush() {
       if (!buffer.length) return;
 
-      // Global payload – metadata + events
       const payload = {
-        dataset,
-        token,
-        events: buffer.splice(0, buffer.length)
+        website_id,
+        secret,
+        events: buffer.splice(0, buffer.length),
       };
 
       navigator.sendBeacon(endpoint, JSON.stringify(payload));
     }
 
     // Fang eksisterende events
-    dataLayer.forEach(obj => {
-      if (obj && typeof obj === 'object') queueEvent(obj);
-    });
+    if (Array.isArray(window.dataLayer)) {
+      window.dataLayer.forEach((obj) => {
+        if (obj && typeof obj === 'object') queueEvent(obj);
+      });
 
-    // Hook fremtidige pushes
-    const originalPush = dataLayer.push;
-    dataLayer.push = function() {
-      const args = Array.from(arguments);
-      const msg = args[0];
-      if (msg && typeof msg === 'object') queueEvent(msg);
-      return originalPush.apply(dataLayer, args);
-    };
+      // Hook fremtidige pushes
+      const originalPush = window.dataLayer.push;
+      window.dataLayer.push = function () {
+        const args = Array.from(arguments);
+        const msg = args[0];
+        if (msg && typeof msg === 'object') queueEvent(msg);
+        return originalPush.apply(window.dataLayer, args);
+      };
+    } else {
+      console.error('❌ dataLayer mangler');
+    }
 
     // Flush ved sideskift eller tab-lukning
     addEventListener('pagehide', flush);
@@ -74,7 +75,6 @@
       if (document.visibilityState === 'hidden') flush();
     });
 
-    console.log('✅ dataLayer beacon listener startet med settings:', settings);
+    console.log('✅ dataLayer beacon listener startet med website_id:', website_id);
   };
-
 })();
