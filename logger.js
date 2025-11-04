@@ -18,11 +18,15 @@
       if (msg?.event && ignore_events.includes(msg.event)) return true;
       return false;
     }
-    
+  
     function sanitize(obj) {
-      if (obj && typeof obj === 'object' && 'gtm.uniqueEventId' in obj) {
+      if (obj && typeof obj === 'object') {
         const clean = { ...obj };
-        delete clean['gtm.uniqueEventId'];
+        for (const key in clean) {
+          if (key.toLowerCase() === 'gtm.uniqueeventid') {
+            delete clean[key];
+          }
+        }
         return clean;
       }
       return obj;
