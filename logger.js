@@ -35,12 +35,14 @@
 
     function addToBuffer(event_name, data, extraFields = {}) {
       const base = {
+        event: event_name,
+        client: 'Client Side GTM',
+        hostname: window.location.hostname,
         page_location: window.location.href,
         user_agent: navigator.userAgent,
         device_type: /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
           ? 'mobile'
           : 'desktop',
-        event: event_name,
         ...extraFields,
         datalayer: sanitize(data || {}),
       };
