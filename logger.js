@@ -8,11 +8,14 @@
     const website_id = settings.website_id;
     const secret = settings.secret;
     const page_id = settings.page_id || null;
+    const debug_mode_enabled = settings.debug_mode === true;
     const ignore_events = settings.ignore_events || [];
     const cmp_log = settings.cmp_log;
     const cmp_cookie_val = settings.cmp_cookie_val;
+
     const buffer = [];
     let cmp_required = false;
+    let datalayer_index_counter = 0;
 
     if (!website_id || !secret)
       return console.error('datalayer log: "website_id" or "secret" is missing');
@@ -26,14 +29,24 @@
     const utm_medium = getQueryParam("utm_medium");
 
     function shouldSkip(msg) {
-      if (msg?.event && msg.event.startsWith('gtm')) return true;
+      if (!msg) return true;
+
+      // Skip ["set", ...] and ["consent", ...]
       if (msg?.[0] === 'set' || msg?.[0] === 'consent') return true;
+
+      // Skip ALL gtm.* except gtm.js
+      if (msg?.event && msg.event.startsWith("gtm.") && msg.event !== "gtm.js") {
+        return true;
+      }
+
+      // Skip ignore list
       if (msg?.event && ignore_events.includes(msg.event)) return true;
+
       return false;
     }
 
     function addToBuffer(event_name, data, extraFields = {}) {
-      const eventIndex = data?.["gtm.uniqueEventId"] || -1;
+      const uniqueId = data?.["gtm.uniqueEventId"] || null;
 
       const base = {
         event: event_name,
@@ -44,25 +57,34 @@
         device_type: /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
           ? 'mobile'
           : 'desktop',
-        event_index: eventIndex,
+        datalayer_index: datalayer_index_counter,
+        page_id: page_id,
         ...extraFields,
         datalayer: data || {}
       };
 
-      if (page_id) {
-        base.page_id = page_id;
-        base.event_id = page_id + "_" + eventIndex;
+      if (uniqueId !== null) {
+        base.event_id = page_id + "_" + uniqueId;
       }
 
       if (utm_source) base.utm_source = utm_source;
       if (utm_medium) base.utm_medium = utm_medium;
+
+      if (debug_mode_enabled) base.debug_mode = true;
 
       buffer.push(base);
     }
 
     function queueEvent(dlEvent) {
       if (shouldSkip(dlEvent)) return;
-      addToBuffer(dlEvent?.event || 'message', dlEvent);
+      datalayer_index_counter++;
+
+      const eventName =
+        dlEvent?.event === "gtm.js"
+          ? "page_view"
+          : (dlEvent?.event || "message");
+
+      addToBuffer(eventName, dlEvent);
     }
 
     function flush() {
@@ -79,6 +101,7 @@
             .split(';')
             .map(c => c.trim().split('=')[0])
             .filter(Boolean);
+          datalayer_index_counter++;
           addToBuffer('consent_required', {}, { cookie_list });
         }
       }
@@ -91,12 +114,14 @@
         dlEvent?.[1] === 'update' &&
         typeof dlEvent?.[2] === 'object'
       ) {
-       addToBuffer('consent_given', {}, { consent: dlEvent[2] });
-       cmp_required = false;
+        datalayer_index_counter++;
+        addToBuffer('consent_given', {}, { consent: dlEvent[2] });
+        cmp_required = false;
       }
     }
 
     if (Array.isArray(window.dataLayer)) {
+
       window.dataLayer.forEach((obj) => {
         if (obj && typeof obj === 'object') {
           queueEvent(obj);
@@ -109,12 +134,16 @@
       window.dataLayer.push = function () {
         const args = Array.from(arguments);
         const msg = args[0];
+
+        const result = originalPush.apply(window.dataLayer, args);
+
         if (msg && typeof msg === 'object') {
           queueEvent(msg);
           handleCmpLoadEvent(msg);
           handleConsentUpdateEvent(msg);
         }
-        return originalPush.apply(window.dataLayer, args);
+
+        return result;
       };
     } else {
       console.error('datalayer log: dataLayer is missing');
