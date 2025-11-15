@@ -34,9 +34,16 @@
       // Skip ["set", ...] and ["consent", ...]
       if (msg?.[0] === 'set' || msg?.[0] === 'consent') return true;
 
-      // Skip ALL gtm.* except gtm.js
-      if (msg?.event && msg.event.startsWith("gtm.") && msg.event !== "gtm.js") {
-        return true;
+       // skip gtm.* events
+      if (msg?.event && msg.event.startsWith('gtm.')) {
+        const allowedGtmEvents = [
+          'gtm.init_consent',
+          'gtm.init',
+          'gtm.js',
+          'gtm.dom',
+          'gtm.load'
+        ];
+        if (!allowedGtmEvents.includes(msg.event)) return true;
       }
 
       // Skip ignore list
