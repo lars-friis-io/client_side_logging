@@ -57,7 +57,7 @@
 
       const base = {
         event: event_name,
-        client: 'Client Side GTM',
+        source: 'datalayer',
         hostname: window.location.hostname,
         page_location: window.location.href,
         user_agent: navigator.userAgent,
@@ -122,7 +122,7 @@
         typeof dlEvent?.[2] === 'object'
       ) {
         datalayer_index_counter++;
-        addToBuffer('consent_given', {}, { consent: dlEvent[2] });
+        addToBuffer('consent_given', {}, dlEvent[2]);
         cmp_required = false;
       }
     }
