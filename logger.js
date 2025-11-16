@@ -56,7 +56,7 @@
       const uniqueId = data?.["gtm.uniqueEventId"] || null;
 
       const base = {
-        event: event_name,
+        event_name: event_name,
         source: 'datalayer',
         hostname: window.location.hostname,
         page_location: window.location.href,
