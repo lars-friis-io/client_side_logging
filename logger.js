@@ -16,29 +16,20 @@
     const buffer = [];
     let cmp_required = false;
     let datalayer_index_counter = 0;
+    let pageViewFired = false; // Kun ét page_view pr. side
 
     if (!website_id || !secret)
       return console.error('datalayer log: "website_id" or "secret" is missing');
 
-    function getQueryParam(name) {
-      const params = new URLSearchParams(window.location.search);
-      return params.get(name);
-    }
-
-    const utm_source = getQueryParam("utm_source");
-    const utm_medium = getQueryParam("utm_medium");
-
     function shouldSkip(msg) {
       if (!msg) return true;
 
-      // Skip ["set", ...] and ["consent", ...]
+      // Skip ["set", ...] og ["consent", ...]
       if (msg?.[0] === 'set' || msg?.[0] === 'consent') return true;
 
-       // skip gtm.* events
+      // Skip gtm.* events – undtag bestemt whitelist
       if (msg?.event && msg.event.startsWith('gtm.')) {
         const allowedGtmEvents = [
-          'gtm.init_consent',
-          'gtm.init',
           'gtm.js',
           'gtm.dom',
           'gtm.load'
@@ -70,12 +61,35 @@
         datalayer: data || {}
       };
 
+      if (event_name === "page_view") {
+        const isFirstPageView = !sessionStorage.getItem("gtm_page_view_tracked");
+
+        if (isFirstPageView) {
+          base.first_page = true;
+          base.referer = document.referrer || null;
+
+          // Tilføj UTM
+          const params = new URLSearchParams(window.location.search);
+          params.forEach((value, key) => {
+            if (key.indexOf('utm_') === 0) base[key] = value;
+          });
+
+          sessionStorage.setItem("gtm_page_view_tracked", "1");
+        }
+      }
+
+      if (event_name === "consent_required" || event_name === "consent_given") {
+        base.referer = document.referrer || null;
+
+        const params = new URLSearchParams(window.location.search);
+        params.forEach((value, key) => {
+          if (key.indexOf('utm_') === 0) base[key] = value;
+        });
+      }
+
       if (uniqueId !== null) {
         base.event_id = page_id + "_" + uniqueId;
       }
-
-      if (utm_source) base.utm_source = utm_source;
-      if (utm_medium) base.utm_medium = utm_medium;
 
       if (debug_mode_enabled) base.debug_mode = true;
 
@@ -86,10 +100,16 @@
       if (shouldSkip(dlEvent)) return;
       datalayer_index_counter++;
 
-      const eventName =
-        dlEvent?.event === "gtm.js"
-          ? "page_view"
-          : (dlEvent?.event || "message");
+      let eventName;
+
+      // Kun ét page_view via gtm.js
+      if (dlEvent?.event === "gtm.js") {
+        if (pageViewFired) return;
+        pageViewFired = true;
+        eventName = "page_view";
+      } else {
+        eventName = dlEvent?.event || "message";
+      }
 
       addToBuffer(eventName, dlEvent);
     }
@@ -127,6 +147,7 @@
       }
     }
 
+    // Setup GTM hook
     if (Array.isArray(window.dataLayer)) {
 
       window.dataLayer.forEach((obj) => {
