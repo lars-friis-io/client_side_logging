@@ -16,8 +16,8 @@
     let datalayer_index_counter = 0;
     let pageViewFired = false;
 
-    if (!website_id || !secret)
-      return console.error('datalayer log: "website_id" or "secret" is missing');
+    if (!host || !token)
+      return console.error('datalayer log: "host" or "token" is missing');
 
     // Hent query params én gang
     const queryParams = new URLSearchParams(window.location.search);
@@ -118,7 +118,7 @@
 
     function flush() {
       if (!buffer.length) return;
-      const payload = { website_id, secret, events: buffer.splice(0, buffer.length) };
+      const payload = { host, token, events: buffer.splice(0, buffer.length) };
       navigator.sendBeacon(endpoint, JSON.stringify(payload));
     }
 
