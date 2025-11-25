@@ -2,7 +2,7 @@
   window.startDataLayerLogger = function (settings) {
     if (!settings)
       return console.error('datalayer log: "settings" is missing');
-    const endpoint = 'https://log.larsfriis.io';
+    const endpoint = 'https://log.lars-c5d.workers.dev';
     const host = settings.host;
     const token = settings.token;
     const page_id = settings.page_id || null;
