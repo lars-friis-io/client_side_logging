@@ -26,12 +26,12 @@
     function shouldSkip(msg) {
       if (!msg) return true;
 
-      // Skip ["set", ...] og ["consent", ...]
+      //Skip ["set", ...] og ["consent", ...]
       if (msg?.[0] === 'set' || msg?.[0] === 'consent') return true;
 
       // Skip gtm.* events undtagen whitelisted
       if (msg?.event && msg.event.startsWith('gtm.')) {
-        const allowedGtmEvents = ['gtm.js', 'gtm.dom', 'gtm.load'];
+        const allowedGtmEvents = ['gtm.js'];
         if (!allowedGtmEvents.includes(msg.event)) return true;
       }
 
@@ -53,7 +53,7 @@
         queryParams.has("gbraid") ||
         queryParams.has("wbraid");
 
-      if (googleAdsClick) base.google_ads_click = true;
+      base.google_ads_click = googleAdsClick ? 1 : 0;
     }
 
     function addToBuffer(event_name, data, extraFields = {}) {
@@ -81,15 +81,14 @@
       if (debug_mode_enabled) base.debug_mode = true;
 
       if (event_name === "page_view") {
-        const isFirstPage = !sessionStorage.getItem("gtm_page_view_tracked");
-
-        if (isFirstPage) {
+        const referrer = document.referrer;
+        if (!referrer) return;
+        const refHost = new URL(referrer).hostname;
+        const isExternalReferrer = refHost !== window.location.hostname;
+        if (isExternalReferrer) {
           base.first_page = true;
           addCommonTrafficData(base);
-          sessionStorage.setItem("gtm_page_view_tracked", "1");
-        } else {
-          base.first_page = "";
-        }
+        } 
       }
 
       if (event_name === "consent_required" || event_name === "consent_given") {
@@ -146,10 +145,17 @@
         typeof dlEvent?.[2] === "object"
       ) {
         datalayer_index_counter++;
-        addToBuffer("consent_given", {}, dlEvent[2]);
+        const consentData = {};
+        Object.entries(dlEvent[2]).forEach(([key, value]) => {
+          if (value === "granted") consentData[key] = 1;
+          else if (value === "denied") consentData[key] = 0;
+          else consentData[key] = value; // fallback hvis andre værdier forekommer
+        });
+
+        addToBuffer("consent_given", {}, consentData);
         cmp_required = false;
-      }
-    }
+  }
+}
 
     if (Array.isArray(window.dataLayer)) {
       window.dataLayer.forEach((obj) => {
