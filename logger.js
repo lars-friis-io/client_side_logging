@@ -36,8 +36,18 @@
       }
 
       // Skip ignore list
-      if (msg?.event && ignore_events.includes(msg.event)) return true;
-
+      if (msg?.event) {
+        for (i = 0; i < ignore_events.length; i++) {
+          var rule = ignore_events[i];
+          if (typeof(rule) !== 'object') continue;
+          if (rule.match === "equal" && msg.event === rule.event_name) {
+            return true;
+          }
+          if (rule.match === "contains" && msg.event.includes(rule.event_name)) {
+            return true;
+          }
+        }
+      }  
       return false;
     }
 
