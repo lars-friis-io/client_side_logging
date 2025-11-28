@@ -20,34 +20,22 @@
     if (!website_id || !secret)
       return console.error('datalayer log: "website_id" or "secret" is missing');
 
-    // Hent query params én gang
     const queryParams = new URLSearchParams(window.location.search);
 
     function shouldSkip(msg) {
       if (!msg) return true;
-
-      //Skip ["set", ...] og ["consent", ...]
       if (msg?.[0] === 'set' || msg?.[0] === 'consent') return true;
-
-      // Skip gtm.* events undtagen whitelisted
       if (msg?.event && msg.event.startsWith('gtm.')) {
-        const allowedGtmEvents = ['gtm.js'];
-        if (!allowedGtmEvents.includes(msg.event)) return true;
+        return msg.event !== 'gtm.js';
       }
-
-      // Skip ignore list
       if (msg?.event) {
-        for (i = 0; i < ignore_events.length; i++) {
-          var rule = ignore_events[i];
-          if (typeof(rule) !== 'object') continue;
-          if (rule.match === "equal" && msg.event === rule.event_name) {
-            return true;
-          }
-          if (rule.match === "contains" && msg.event.includes(rule.event_name)) {
-            return true;
-          }
+        for (let i = 0; i < ignore_events.length; i++) {
+          const rule = ignore_events[i];
+          if (typeof rule !== 'object') continue;
+          if (rule.match === "equal" && msg.event === rule.event_name) return true;
+          if (rule.match === "contains" && msg.event.includes(rule.event_name)) return true;
         }
-      }  
+      }
       return false;
     }
 
@@ -57,13 +45,7 @@
       });
 
       base.referer = document.referrer || null;
-
-      const googleAdsClick =
-        queryParams.has("gclid") ||
-        queryParams.has("gbraid") ||
-        queryParams.has("wbraid");
-
-      base.google_ads_click = googleAdsClick ? 1 : 0;
+      base.google_ads_click = queryParams.has("gclid") || queryParams.has("gbraid") || queryParams.has("wbraid") ? 1 : 0;
     }
 
     function addToBuffer(event_name, data, extraFields = {}) {
@@ -71,21 +53,24 @@
 
       const base = {
         event_name,
-        source: "datalayer",
+        source: "datalayer", // default værdi, overskrives evt. af extraFields
         hostname: window.location.hostname,
         page_location: window.location.href,
         user_agent: navigator.userAgent,
-        device_type: /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-          ? "mobile"
-          : "desktop",
+        device_type: /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ? "mobile" : "desktop",
         datalayer_index: datalayer_index_counter,
         page_id,
         ...extraFields,
         datalayer: data || {}
       };
 
-      if (uniqueId !== null) {
-        base.event_id = page_id + "_" + uniqueId;
+      if (extraFields.source === "consent") {
+        delete base.datalayer_index;
+        delete base.datalayer;
+      }
+
+      if (uniqueId !== null && base.datalayer) {
+        base.event_id = `${page_id}_${uniqueId}`;
       }
 
       if (debug_mode_enabled) base.debug_mode = true;
@@ -94,14 +79,13 @@
         const referrer = document.referrer;
         if (!referrer) return;
         const refHost = new URL(referrer).hostname;
-        const isExternalReferrer = refHost !== window.location.hostname;
-        if (isExternalReferrer) {
+        if (refHost !== window.location.hostname) {
           base.first_page = true;
           addCommonTrafficData(base);
-        } 
+        }
       }
 
-      if (event_name === "consent_required" || event_name === "consent_given") {
+      if (event_name === "consent_required" || event_name === "consent_defined") {
         addCommonTrafficData(base);
       }
 
@@ -113,8 +97,6 @@
       datalayer_index_counter++;
 
       let eventName;
-
-      // Page_view fra første gtm.js
       if (dlEvent?.event === "gtm.js") {
         if (pageViewFired) return;
         pageViewFired = true;
@@ -132,19 +114,9 @@
       navigator.sendBeacon(endpoint, JSON.stringify(payload));
     }
 
-    function handleCmpLoadEvent(dlEvent) {
-      if (cmp_log && dlEvent?.event === "gtm.load") {
-        if (cmp_cookie_val === undefined) {
-          cmp_required = true;
-          const cookie_list = (document.cookie || "")
-            .split(";")
-            .map((c) => c.trim().split("=")[0])
-            .filter(Boolean);
-
-          datalayer_index_counter++;
-          addToBuffer("consent_required", {}, { cookie_list });
-        }
-      }
+    if (cmp_log && cmp_cookie_val === undefined) {
+      cmp_required = true;
+      addToBuffer("consent_required", null, { source: "consent" });
     }
 
     function handleConsentUpdateEvent(dlEvent) {
@@ -154,39 +126,52 @@
         dlEvent?.[1] === "update" &&
         typeof dlEvent?.[2] === "object"
       ) {
-        datalayer_index_counter++;
-        const consentData = {};
+        // Formatér consent-values til 1/0
+        const consentPayload = {};
         Object.entries(dlEvent[2]).forEach(([key, value]) => {
-          if (value === "granted") consentData[key] = 1;
-          else if (value === "denied") consentData[key] = 0;
-          else consentData[key] = value; // fallback hvis andre værdier forekommer
+          if (value === "granted") consentPayload[key] = 1;
+          else if (value === "denied") consentPayload[key] = 0;
         });
+        consentPayload.source = "consent";
 
-        addToBuffer("consent_given", {}, consentData);
+        // Fyres uanset granted/denied
+        addToBuffer("consent_defined", null, consentPayload);
+
+        // Hvis denied → fyr consent_denied efter 2 sek med cookie liste
+        if (consentPayload["ad_storage"] === 0 && consentPayload["analytics_storage"] === 0) {
+          setTimeout(() => {
+            const cookie_list = (document.cookie || "")
+              .split(";")
+              .map((c) => c.trim().split("=")[0])
+              .filter(Boolean);
+
+            addToBuffer("consent_denied", null, {
+              cookie_list,
+              source: "consent"
+            });
+          }, 2000);
+        }
+
         cmp_required = false;
-  }
-}
+      }
+    }
 
     if (Array.isArray(window.dataLayer)) {
       window.dataLayer.forEach((obj) => {
         if (obj && typeof obj === "object") {
           queueEvent(obj);
-          handleCmpLoadEvent(obj);
           handleConsentUpdateEvent(obj);
         }
       });
 
-      // Override push efterfølgende
       const originalPush = window.dataLayer.push;
       window.dataLayer.push = function () {
         const args = Array.from(arguments);
         const msg = args[0];
-
         const result = originalPush.apply(window.dataLayer, args);
 
         if (msg && typeof msg === "object") {
           queueEvent(msg);
-          handleCmpLoadEvent(msg);
           handleConsentUpdateEvent(msg);
         }
 
