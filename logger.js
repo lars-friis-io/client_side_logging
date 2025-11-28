@@ -147,6 +147,7 @@
 
             addToBuffer("consent_denied", null, {
               cookie_list,
+              cookie_count: cookie_list.length,
               source: "consent"
             });
           }, 2000);
