@@ -181,10 +181,11 @@
     } else {
       console.error("datalayer log: dataLayer mangler");
     }
-
-    addEventListener("pagehide", flush);
-    addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden") flush();
+   addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flush();
     });
+    addEventListener("pagehide", flush);
+    addEventListener("beforeunload", flush);
+    addEventListener("popstate", flush);
   };
 })();
