@@ -4,10 +4,8 @@
       console.error('datalayer log: "settings" is missing');
       return;
     }
-
-    const endpoint =
-      settings.endpoint ||
-      "https://browser-intake-datadoghq.eu/api/v2/logs";
+    
+    const endpoint = settings.endpoint || "https://browser-intake-datadoghq.eu/api/v2/logs";
     const customer = settings.customer;
     const token = settings.token;
     const page_id = settings.page_id || null;
@@ -72,7 +70,7 @@
 
       const base = {
         event_name,
-        source: "datalayer",
+        service: "datalayer",
         customer,
         hostname: window.location.hostname,
         page_location: window.location.href,
@@ -87,7 +85,7 @@
         datalayer: data || {}
       };
 
-      if (extraFields.source === "consent") {
+      if (extraFields.service === "cmp") {
         delete base.datalayer_index;
         delete base.datalayer;
       }
@@ -140,18 +138,18 @@
 
     function flush() {
       if (!buffer.length) return;
-
-      const payload = buffer.splice(0, buffer.length);
-
+        const payload = buffer
+        .splice(0)
+        .map(e => JSON.stringify(e))
+        .join("\n");
       navigator.sendBeacon(
         endpoint + "?dd-api-key=" + token,
-        JSON.stringify(payload)
+        payload
       );
     }
-
     if (cmp_log && cmp_cookie_val === undefined) {
       cmp_required = true;
-      addToBuffer("consent_required", null, { source: "consent" });
+      addToBuffer("consent_required", null, { service: "cmp" });
     }
 
     function handleConsentUpdateEvent(dlEvent) {
@@ -168,7 +166,7 @@
           else if (value === "denied") consentPayload[key] = 0;
         });
 
-        consentPayload.source = "consent";
+        consentPayload.service = "cmp";
 
         addToBuffer("consent_defined", null, consentPayload);
 
@@ -183,7 +181,7 @@
               .filter(Boolean);
 
             addToBuffer("consent_denied", null, {
-              source: "consent",
+              service: "cmp",
               cookie_list,
               cookie_count: cookie_list.length
             });
