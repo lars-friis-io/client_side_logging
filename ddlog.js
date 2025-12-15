@@ -27,9 +27,6 @@
       return;
     }  
     
-    const endpoint = settings.endpoint || "https://browser-intake-datadoghq.eu/api/v2/logs";
-    const customer = settings.customer;
-    const token = settings.token;
     const page_id = settings.page_id || null;
     const session_id = settings.session_id || null;
     const debug_mode_enabled = settings.debug_mode === true;
