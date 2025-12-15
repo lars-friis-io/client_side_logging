@@ -1,9 +1,31 @@
 (function () {
-  window.startDataLayerLogger = function (settings) {
+    window.startDataLayerLogger = function (settings) {
     if (!settings) {
       console.error('datalayer log: "settings" is missing');
       return;
     }
+    function isBot() {
+      const ua = navigator.userAgent.toLowerCase();
+        if (/bot|crawl|spider|slurp|bingpreview|facebookexternalhit|embedly|quora|whatsapp|telegrambot|discordbot|linkedinbot|pinterest|skypeuripreview/.test(ua)) {
+        return true;
+      }
+      if (navigator.webdriver === true) return true;
+      if (!navigator.languages || navigator.languages.length === 0) return true;
+      if (!navigator.plugins || navigator.plugins.length === 0) return true;
+      return false;
+    }
+    const endpoint = settings.endpoint || "https://browser-intake-datadoghq.eu/api/v2/logs";
+    const customer = settings.customer;
+    const token = settings.token;
+
+    if (!customer || !token) {
+      console.error('datalayer log: "token" or "customer" is missing');
+      return;
+    }
+
+    if (isBot()) {
+      return;
+    }  
     
     const endpoint = settings.endpoint || "https://browser-intake-datadoghq.eu/api/v2/logs";
     const customer = settings.customer;
