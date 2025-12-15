@@ -81,6 +81,7 @@
         datalayer_index: datalayer_index_counter,
         page_id,
         session_id,
+        timestamp: Date.now(),
         ...extraFields,
         datalayer: data || {}
       };
