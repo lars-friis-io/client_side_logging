@@ -6,7 +6,7 @@
     }
     function isBot() {
       const ua = navigator.userAgent.toLowerCase();
-        if (/bot|crawl|spider|slurp|bingpreview|facebookexternalhit|embedly|quora|whatsapp|telegrambot|discordbot|linkedinbot|pinterest|skypeuripreview/.test(ua)) {
+        if (/headlesschrome|cookieinformationscanner|bot|crawl|spider|slurp|bingpreview|facebookexternalhit|embedly|quora|whatsapp|telegrambot|discordbot|linkedinbot|pinterest|skypeuripreview/.test(ua)) {
         return true;
       }
       if (navigator.webdriver === true) return true;
