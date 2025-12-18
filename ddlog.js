@@ -1,32 +1,13 @@
 (function () {
-    window.startDataLayerLogger = function (settings) {
+  window.startDataLayerLogger = function (settings) {
     if (!settings) {
       console.error('datalayer log: "settings" is missing');
       return;
     }
-    function isBot() {
-      const ua = navigator.userAgent.toLowerCase();
-        if (/headlesschrome|cookieinformationscanner|bot|crawl|spider|slurp|bingpreview|facebookexternalhit|embedly|quora|whatsapp|telegrambot|discordbot|linkedinbot|pinterest|skypeuripreview/.test(ua)) {
-        return true;
-      }
-      if (navigator.webdriver === true) return true;
-      if (!navigator.languages || navigator.languages.length === 0) return true;
-      if (!navigator.plugins || navigator.plugins.length === 0) return true;
-      return false;
-    }
+
     const endpoint = settings.endpoint || "https://browser-intake-datadoghq.eu/api/v2/logs";
     const customer = settings.customer;
     const token = settings.token;
-
-    if (!customer || !token) {
-      console.error('datalayer log: "token" or "customer" is missing');
-      return;
-    }
-
-    if (isBot()) {
-      return;
-    }  
-    
     const page_id = settings.page_id || null;
     const session_id = settings.session_id || null;
     const debug_mode_enabled = settings.debug_mode === true;
@@ -40,7 +21,6 @@
     }
 
     const buffer = [];
-    let cmp_required = false;
     let datalayer_index_counter = 0;
     let pageViewFired = false;
 
@@ -129,13 +109,6 @@
         }
       }
 
-      if (
-        event_name === "consent_required" ||
-        event_name === "consent_defined"
-      ) {
-        addCommonTrafficData(base);
-      }
-
       buffer.push(base);
     }
 
@@ -156,60 +129,79 @@
       addToBuffer(eventName, dlEvent);
     }
 
-    function flush() {
-      if (!buffer.length) return;
-        const payload = buffer
-        .splice(0)
-        .map(e => JSON.stringify(e))
-        .join("\n");
-      navigator.sendBeacon(
-        endpoint + "?dd-api-key=" + token,
-        payload
-      );
-    }
+    let shouldMeasureConsent = false;
+    let bannerInteraction = 0;
+    let latestConsent = {
+      ad_storage: 0,
+      analytics_storage: 0
+    };
+
     if (cmp_log && cmp_cookie_val === undefined) {
-      cmp_required = true;
-      addToBuffer("consent_required", null, { service: "cmp" });
+      shouldMeasureConsent = true;
     }
 
     function handleConsentUpdateEvent(dlEvent) {
       if (
-        cmp_required &&
-        dlEvent?.[0] === "consent" &&
-        dlEvent?.[1] === "update" &&
-        typeof dlEvent?.[2] === "object"
+        !shouldMeasureConsent ||
+        dlEvent?.[0] !== "consent" ||
+        dlEvent?.[1] !== "update" ||
+        typeof dlEvent?.[2] !== "object"
       ) {
-        const consentPayload = {};
-
-        Object.entries(dlEvent[2]).forEach(([key, value]) => {
-          if (value === "granted") consentPayload[key] = 1;
-          else if (value === "denied") consentPayload[key] = 0;
-        });
-
-        consentPayload.service = "cmp";
-
-        addToBuffer("consent_defined", null, consentPayload);
-
-        if (
-          consentPayload.ad_storage === 0 &&
-          consentPayload.analytics_storage === 0
-        ) {
-          setTimeout(() => {
-            const cookie_list = (document.cookie || "")
-              .split(";")
-              .map((c) => c.trim().split("=")[0])
-              .filter(Boolean);
-
-            addToBuffer("consent_denied", null, {
-              service: "cmp",
-              cookie_list,
-              cookie_count: cookie_list.length
-            });
-          }, 2000);
-        }
-
-        cmp_required = false;
+        return;
       }
+
+      bannerInteraction = 1;
+
+      Object.entries(dlEvent[2]).forEach(([key, value]) => {
+        if (value === "granted") latestConsent[key] = 1;
+        else if (value === "denied") latestConsent[key] = 0;
+      });
+    }
+
+    function buildConsentEvent() {
+      if (!shouldMeasureConsent) return null;
+
+      const payload = {
+        service: "cmp",
+        banner_interaction: bannerInteraction,
+        ad_storage: latestConsent.ad_storage,
+        analytics_storage: latestConsent.analytics_storage
+      };
+
+      if (
+        latestConsent.ad_storage === 0 &&
+        latestConsent.analytics_storage === 0
+      ) {
+        const cookie_list = (document.cookie || "")
+          .split(";")
+          .map(c => c.trim().split("=")[0])
+          .filter(Boolean);
+
+        payload.cookie_list = cookie_list;
+        payload.cookie_count = cookie_list.length;
+      }
+
+      shouldMeasureConsent = false;
+      return payload;
+    }
+
+    function flush() {
+      const consentPayload = buildConsentEvent();
+      if (consentPayload) {
+        addToBuffer("consent", null, consentPayload);
+      }
+
+      if (!buffer.length) return;
+
+      const payload = buffer
+        .splice(0)
+        .map(e => JSON.stringify(e))
+        .join("\n");
+
+      navigator.sendBeacon(
+        endpoint + "?dd-api-key=" + token,
+        payload
+      );
     }
 
     if (Array.isArray(window.dataLayer)) {
