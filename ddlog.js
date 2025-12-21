@@ -15,6 +15,22 @@
     const cmp_log = settings.cmp_log;
     const cmp_cookie_val = settings.cmp_cookie_val;
 
+    const sampling_enabled =
+      settings.samling === true && debug_mode_enabled !== true;
+
+    const send_bucket =
+      !sampling_enabled ||
+      (typeof session_id === "string" && session_id.endsWith("1"));
+
+    const unsampled_session = send_bucket;
+
+    const key_events = [];
+    if (Array.isArray(settings.key_events)) {
+      for (let i = 0; i < settings.key_events.length; i++) {
+        key_events.push(settings.key_events[i]);
+      }
+    }
+
     if (!customer || !token) {
       console.error('datalayer log: "token" or "customer" is missing');
       return;
@@ -38,16 +54,18 @@
         for (let i = 0; i < ignore_events.length; i++) {
           const rule = ignore_events[i];
           if (typeof rule !== "object") continue;
-          if (rule.match === "equal" && msg.event === rule.event_name)
-            return true;
-          if (
-            rule.match === "contains" &&
-            msg.event.includes(rule.event_name)
-          )
-            return true;
+          if (rule.match === "equal" && msg.event === rule.event_name) return true;
+          if (rule.match === "contains" && msg.event.includes(rule.event_name)) return true;
         }
       }
       return false;
+    }
+
+    function sanitizeDataLayer(data) {
+      if (!data || typeof data !== "object") return data;
+      const clean = { ...data };
+      delete clean["gtm.uniqueEventId"];
+      return clean;
     }
 
     function addCommonTrafficData(base) {
@@ -64,10 +82,17 @@
           : 0;
     }
 
-    function addToBuffer(event_name, data, extraFields = {}) {
+    function isKeyEvent(eventName) {
+      for (let i = 0; i < key_events.length; i++) {
+        if (key_events[i]?.event_name === eventName) return true;
+      }
+      return false;
+    }
+
+    function buildEventPayload(event_name, data, extraFields = {}) {
       const uniqueId = data?.["gtm.uniqueEventId"] ?? null;
 
-      const base = {
+      const payload = {
         event_name,
         service: "datalayer",
         customer,
@@ -81,35 +106,48 @@
         page_id,
         session_id,
         timestamp: Date.now(),
+        unsampled_session: unsampled_session,
         ...extraFields,
-        datalayer: data || {}
+        datalayer: sanitizeDataLayer(data)
       };
 
-      if (extraFields.service === "cmp") {
-        delete base.datalayer_index;
-        delete base.datalayer;
-      }
-
-      if (uniqueId !== null && base.datalayer) {
-        base.event_id = `${page_id}_${uniqueId}`;
+      if (uniqueId !== null) {
+        payload.event_id = `${page_id}_${uniqueId}`;
       }
 
       if (debug_mode_enabled) {
-        base.debug_mode = true;
+        payload.debug_mode = true;
       }
+
+      return payload;
+    }
+
+    function addToBuffer(event_name, data, extraFields = {}) {
+      const payload = buildEventPayload(event_name, data, extraFields);
 
       if (event_name === "page_view") {
         const referrer = document.referrer;
-        if (!referrer) return;
-
-        const refHost = new URL(referrer).hostname;
-        if (refHost !== window.location.hostname) {
-          base.first_page = true;
-          addCommonTrafficData(base);
+        if (referrer) {
+          const refHost = new URL(referrer).hostname;
+          if (refHost !== window.location.hostname) {
+            payload.first_page = true;
+            addCommonTrafficData(payload);
+          }
         }
       }
 
-      buffer.push(base);
+      buffer.push(payload);
+    }
+
+    function sendKeyEvent(event_name, data) {
+      const payload = buildEventPayload(event_name, data, {
+        key_event: true
+      });
+
+      navigator.sendBeacon(
+        endpoint + "?dd-api-key=" + token,
+        JSON.stringify(payload)
+      );
     }
 
     function queueEvent(dlEvent) {
@@ -124,6 +162,11 @@
         eventName = "page_view";
       } else {
         eventName = dlEvent?.event || "message";
+      }
+
+      if (isKeyEvent(eventName)) {
+        sendKeyEvent(eventName, dlEvent);
+        return;
       }
 
       addToBuffer(eventName, dlEvent);
@@ -165,7 +208,8 @@
         service: "cmp",
         banner_interaction: bannerInteraction,
         ad_storage: latestConsent.ad_storage,
-        analytics_storage: latestConsent.analytics_storage
+        analytics_storage: latestConsent.analytics_storage,
+        unsampled_session: unsampled_session
       };
 
       if (
@@ -193,15 +237,19 @@
 
       if (!buffer.length) return;
 
-      const payload = buffer
-        .splice(0)
-        .map(e => JSON.stringify(e))
-        .join("\n");
+      if (send_bucket) {
+        const payload = buffer
+          .splice(0)
+          .map(e => JSON.stringify(e))
+          .join("\n");
 
-      navigator.sendBeacon(
-        endpoint + "?dd-api-key=" + token,
-        payload
-      );
+        navigator.sendBeacon(
+          endpoint + "?dd-api-key=" + token,
+          payload
+        );
+      } else {
+        buffer.length = 0;
+      }
     }
 
     if (Array.isArray(window.dataLayer)) {
@@ -214,20 +262,14 @@
 
       const originalPush = window.dataLayer.push;
       window.dataLayer.push = function () {
-        const args = Array.from(arguments);
-        const msg = args[0];
-
-        const result = originalPush.apply(window.dataLayer, args);
-
+        const msg = arguments[0];
+        const result = originalPush.apply(window.dataLayer, arguments);
         if (msg && typeof msg === "object") {
           queueEvent(msg);
           handleConsentUpdateEvent(msg);
         }
-
         return result;
       };
-    } else {
-      console.error("datalayer log: dataLayer mangler");
     }
 
     addEventListener("visibilitychange", () => {
