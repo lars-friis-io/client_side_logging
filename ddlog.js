@@ -42,6 +42,27 @@
 
     const queryParams = new URLSearchParams(window.location.search);
 
+    // bot filtering
+    const ua = (navigator.userAgent || "");
+    const namedBotRe = /(CookieInformationScanner|Morningscore|Googlebot|AdsBot-Google|Mediapartners-Google|APIs-Google|Google-InspectionTool|Storebot-Google|AhrefsBot|AhrefsSiteAudit)/i;
+    const automationRe = /(HeadlessChrome|phantomjs|selenium|webdriver|playwright|puppeteer|chromedriver)/i;
+    const webdriver = navigator.webdriver === true;
+    const noPlugins =
+      typeof navigator.plugins !== "undefined" &&
+      navigator.plugins.length === 0;
+    const noLanguages =
+      typeof navigator.languages !== "undefined" &&
+      navigator.languages.length === 0;
+    const isBot =
+      namedBotRe.test(ua) ||
+      automationRe.test(ua) ||
+      webdriver || 
+      (noPlugins && noLanguages);
+
+    if (isBot) {
+      return;
+    }
+
     function shouldSkip(msg) {
       if (!msg) return true;
       if (msg?.[0] === "set" || msg?.[0] === "consent") return true;
