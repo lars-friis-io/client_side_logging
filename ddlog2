@@ -1,0 +1,311 @@
+(function () {
+  window.startDataLayerLogger = function (settings) {
+    if (!settings) {
+      console.error('datalayer log: "settings" is missing');
+      return;
+    }
+    
+    const endpoint = settings.endpoint || "https://browser-intake-datadoghq.eu/api/v2/logs";
+    const customer = settings.customer;
+    const token = settings.token;
+    const page_id = settings.page_id || null;
+    const session_id = settings.session_id || null;
+    const debug_mode_enabled = settings.debug_mode === true;
+    const ignore_events = settings.ignore_events || [];
+    const cmp_log = settings.cmp_log;
+
+    if (!customer || !token) {
+      console.error('datalayer log: "token" or "customer" is missing');
+      return;
+    }
+
+    const sampling_enabled =
+      settings.samling === true && debug_mode_enabled !== true;
+
+    const send_bucket =
+      !sampling_enabled ||
+      (typeof session_id === "string" && session_id.endsWith("1"));
+
+    const unsampled_session = send_bucket;
+
+    const pageLocationNoQuery =
+      window.location.origin + window.location.pathname;
+
+    let sessionAttribution = null;
+    try {
+      const stored = sessionStorage.getItem("gtm_log_session_attribution");
+      if (stored) sessionAttribution = JSON.parse(stored);
+    } catch (_) {}
+
+    function buildPendingAttribution() {
+      const params = new URLSearchParams(window.location.search);
+      const attribution = {
+        landing_page: window.location.href,
+        referrer: document.referrer || null
+      };
+
+      params.forEach((value, key) => {
+        if (key.startsWith("utm_")) {
+          attribution[key] = value;
+        }
+      });
+
+      return attribution;
+    }
+
+    const pendingAttribution = buildPendingAttribution();
+
+    const key_events = Array.isArray(settings.key_events)
+      ? settings.key_events.slice()
+      : [];
+
+    function isKeyEvent(eventName) {
+      return key_events.some(e => e?.event_name === eventName);
+    }
+
+    function getCookiesObject() {
+      const cookies = {};
+      const raw = document.cookie || "";
+      if (!raw) return cookies;
+
+      raw.split(";").forEach(part => {
+        const [key, ...rest] = part.trim().split("=");
+        if (!key) return;
+        cookies[key] = rest.join("=") || "";
+      });
+
+      return cookies;
+    }
+
+    const ua = navigator.userAgent || "";
+    const namedBotRe =
+      /(CookieInformationScanner|Morningscore|Googlebot|AdsBot-Google|Mediapartners-Google|APIs-Google|Google-InspectionTool|Storebot-Google|AhrefsBot|AhrefsSiteAudit)/i;
+    const automationRe =
+      /(HeadlessChrome|phantomjs|selenium|webdriver|playwright|puppeteer|chromedriver)/i;
+
+    if (
+      namedBotRe.test(ua) ||
+      automationRe.test(ua) ||
+      navigator.webdriver === true
+    ) {
+      return;
+    }
+
+    const buffer = [];
+    let datalayer_index_counter = 0;
+    let pageViewFired = false;
+
+    let consentUpdated = false;
+    let bannerInteraction = 0;
+    let latestConsent = {
+      ad_storage: 0,
+      analytics_storage: 0
+    };
+
+    function handleConsentUpdateEvent(dlEvent) {
+      if (
+        dlEvent?.[0] !== "consent" ||
+        dlEvent?.[1] !== "update" ||
+        typeof dlEvent?.[2] !== "object"
+      ) {
+        return;
+      }
+
+      consentUpdated = true;
+      bannerInteraction = 1;
+
+      Object.entries(dlEvent[2]).forEach(([key, value]) => {
+        if (value === "granted") latestConsent[key] = 1;
+        else if (value === "denied") latestConsent[key] = 0;
+      });
+
+      if (
+        latestConsent.ad_storage === 1 &&
+        latestConsent.analytics_storage === 1 &&
+        !sessionAttribution
+      ) {
+        sessionAttribution = pendingAttribution;
+        sessionStorage.setItem(
+          "gtm_log_session_attribution",
+          JSON.stringify(sessionAttribution)
+        );
+      }
+    }
+
+    function sendCmpOnUnload() {
+      if (!cmp_log) return;
+      if (sampling_enabled && !send_bucket) return;
+
+      navigator.sendBeacon(
+        endpoint + "?dd-api-key=" + token,
+        JSON.stringify({
+          service: "cmp",
+          customer,
+          timestamp: Date.now(),
+          consent_resolved: consentUpdated ? 1 : 0,
+          banner_interaction: bannerInteraction,
+          ad_storage: latestConsent.ad_storage,
+          analytics_storage: latestConsent.analytics_storage,
+          page_location: pageLocationNoQuery,
+          hostname: window.location.hostname,
+          user_agent: navigator.userAgent,
+          device_type:
+            /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+              ? "mobile"
+              : "desktop",
+          unsampled_session
+        })
+      );
+    }
+
+    function shouldSkip(msg) {
+      if (!msg) return true;
+      if (msg?.[0] === "set" || msg?.[0] === "consent") return true;
+
+      if (msg?.event && msg.event.startsWith("gtm.")) {
+        return msg.event !== "gtm.js";
+      }
+
+      if (msg?.event) {
+        return ignore_events.some(rule => {
+          if (!rule || typeof rule !== "object") return false;
+          if (rule.match === "equal") return msg.event === rule.event_name;
+          if (rule.match === "contains")
+            return msg.event.includes(rule.event_name);
+          return false;
+        });
+      }
+      return false;
+    }
+
+    function sanitizeDataLayer(data) {
+      if (!data || typeof data !== "object") return data;
+      const clean = { ...data };
+      delete clean["gtm.uniqueEventId"];
+      return clean;
+    }
+
+    function buildEventPayload(event_name, data, extraFields = {}) {
+      const uniqueId = data?.["gtm.uniqueEventId"] ?? null;
+
+      const payload = {
+        event_name,
+        service: "datalayer",
+        customer,
+        hostname: window.location.hostname,
+        page_location: pageLocationNoQuery,
+        user_agent: navigator.userAgent,
+        device_type:
+          /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+            ? "mobile"
+            : "desktop",
+        datalayer_index: datalayer_index_counter,
+        page_id,
+        session_id,
+        timestamp: Date.now(),
+        unsampled_session,
+        ...extraFields,
+        datalayer: sanitizeDataLayer(data)
+      };
+
+      if (uniqueId !== null) {
+        payload.event_id = `${page_id}_${uniqueId}`;
+      }
+
+      if (debug_mode_enabled) {
+        payload.debug_mode = true;
+      }
+
+      return payload;
+    }
+
+    function addToBuffer(event_name, data, extraFields = {}) {
+      buffer.push(buildEventPayload(event_name, data, extraFields));
+    }
+
+    function flush() {
+      if (!consentUpdated) return;
+      if (!buffer.length) return;
+
+      if (
+        latestConsent.ad_storage !== 1 ||
+        latestConsent.analytics_storage !== 1
+      ) {
+        buffer.length = 0;
+        return;
+      }
+
+      const hasKeyEvent = buffer.some(e => e.key_event === true);
+
+      if (!sampling_enabled || hasKeyEvent || send_bucket) {
+        navigator.sendBeacon(
+          endpoint + "?dd-api-key=" + token,
+          buffer.map(e => JSON.stringify(e)).join("\n")
+        );
+      }
+
+      buffer.length = 0;
+    }
+
+    function queueEvent(dlEvent) {
+      if (shouldSkip(dlEvent)) return;
+
+      datalayer_index_counter++;
+
+      let eventName;
+      if (dlEvent?.event === "gtm.js") {
+        if (pageViewFired) return;
+        pageViewFired = true;
+        eventName = "page_view";
+      } else {
+        eventName = dlEvent?.event || "message";
+      }
+
+      if (isKeyEvent(eventName)) {
+        addToBuffer(eventName, dlEvent, {
+          key_event: true,
+          attribution: sessionAttribution || pendingAttribution,
+          cookies: getCookiesObject()
+        });
+        flush();
+        return;
+      }
+
+      addToBuffer(eventName, dlEvent);
+    }
+
+    if (Array.isArray(window.dataLayer)) {
+      window.dataLayer.forEach(obj => {
+        if (obj && typeof obj === "object") {
+          queueEvent(obj);
+          handleConsentUpdateEvent(obj);
+        }
+      });
+
+      const originalPush = window.dataLayer.push;
+      window.dataLayer.push = function () {
+        const msg = arguments[0];
+        const result = originalPush.apply(window.dataLayer, arguments);
+        if (msg && typeof msg === "object") {
+          queueEvent(msg);
+          handleConsentUpdateEvent(msg);
+        }
+        return result;
+      };
+    }
+
+    setInterval(flush, 5000);
+    addEventListener("pagehide", () => {
+      flush();
+      sendCmpOnUnload();
+    });
+    addEventListener("beforeunload", () => {
+      flush();
+      sendCmpOnUnload();
+    });
+    addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") flush();
+    });
+    addEventListener("popstate", flush);
+  };
+})();
