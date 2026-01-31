@@ -46,7 +46,7 @@
       return;
     }
 
-    // traffic / session data
+    // session / traffic data
     const SESSION_COOKIE_NAME = "gtm_log_session";
 
     function readSessionCookie() {
@@ -87,8 +87,7 @@
     const sessionData = log_traffic
       ? existingSession || {
           landing_page: window.location.href,
-          referrer: document.referrer || null,
-          utm: parseUtmParams(window.location.href)
+          referrer: document.referrer || null
         }
       : null;
 
@@ -166,11 +165,11 @@
         datalayer: sanitizeDataLayer(data)
       };
 
-      if (log_traffic && sessionData) {
+      if (log_traffic && sessionData?.landing_page) {
         payload.session = {
           landing_page: sessionData.landing_page,
           referrer: sessionData.referrer,
-          ...sessionData.utm
+          ...parseUtmParams(sessionData.landing_page)
         };
       }
 
