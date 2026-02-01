@@ -105,6 +105,7 @@
     function shouldSkip(msg) {
       if (!msg) return true;
       if (msg?.[0] === "set") return true;
+      if (msg?.[0] === "consent") return true;
 
       if (msg?.event && msg.event.startsWith("gtm.")) {
         return msg.event !== "gtm.js";
@@ -119,13 +120,6 @@
         }
       }
       return false;
-    }
-
-    function sanitizeDataLayer(data) {
-      if (!data || typeof data !== "object") return data;
-      const clean = { ...data };
-      delete clean["gtm.uniqueEventId"];
-      return clean;
     }
 
     function isKeyEvent(eventName) {
@@ -162,7 +156,7 @@
         page_id,
         session_id,
         timestamp: Date.now(),
-        datalayer: sanitizeDataLayer(data)
+        datalayer: data
       };
 
       if (log_traffic && sessionData?.landing_page) {
@@ -246,9 +240,18 @@
       const isSampledSession =
         sampling_enabled === true && pageHasKeyEvent === true;
 
+      const consentState = window.gtm_consent_state || {};
       const payload = buffer
         .splice(0)
         .map(e => {
+           const uniqueId = e.datalayer?.["gtm.uniqueEventId"];
+           if (uniqueId != null) {
+             const consent = consentState[uniqueId];
+             if (consent) {
+                e.consent = consent;
+              }
+          }
+          
           if (isSampledSession) {
             e.sampled_session = true;
           }
