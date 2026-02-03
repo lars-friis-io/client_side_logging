@@ -45,20 +45,18 @@
     }
 
     // helpers
-    function parseUtmParams(url) {
-      const utm = {};
-      if (!url) return utm;
+    function parseQueryParams(url) {
+      const params = {};
+      if (!url) return params;
 
       try {
         const parsed = new URL(url);
         parsed.searchParams.forEach((value, key) => {
-          if (key.startsWith("utm_")) {
-            utm[key] = value;
-          }
+          params[key] = value;
         });
       } catch {}
 
-      return utm;
+      return params;
     }
 
     function shouldSkip(msg) {
@@ -125,20 +123,16 @@
         datalayer: data
       };
 
-      // session data from settings
+      // session (direkte fra settings)
       if (
         typeof settings.session_landing_page === "string" ||
         typeof settings.session_referrer === "string"
       ) {
         payload.session = {
           landing_page: settings.session_landing_page || null,
-          referrer: settings.session_referrer || null
+          referrer: settings.session_referrer || null,
+          query_parameters: parseQueryParams(settings.session_landing_page)
         };
-
-        const utmParams = parseUtmParams(settings.session_landing_page);
-        Object.keys(utmParams).forEach(key => {
-          payload.session[key] = utmParams[key];
-        });
       }
 
       if (log_cookies) {
