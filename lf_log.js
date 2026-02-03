@@ -15,9 +15,7 @@
     const session_id = settings.session_id || null;
     const debug_mode_enabled = settings.debug_mode === true;
     const ignore_events = settings.ignore_events || [];
-
     const log_cookies = settings.log_cookies === true;
-    const log_traffic = settings.log_traffic === true;
 
     if (!customer || !token) {
       console.error('datalayer log: "token" or "customer" is missing');
@@ -46,31 +44,11 @@
       return;
     }
 
-    // session / traffic data
-    const SESSION_COOKIE_NAME = "gtm_log_session";
-
-    function readSessionCookie() {
-      const match = document.cookie
-        .split("; ")
-        .find(c => c.startsWith(SESSION_COOKIE_NAME + "="));
-      if (!match) return null;
-      try {
-        return JSON.parse(decodeURIComponent(match.split("=")[1]));
-      } catch {
-        return null;
-      }
-    }
-
-    function writeSessionCookie(data) {
-      document.cookie =
-        SESSION_COOKIE_NAME +
-        "=" +
-        encodeURIComponent(JSON.stringify(data)) +
-        "; path=/; SameSite=Lax";
-    }
-
+    // helpers
     function parseUtmParams(url) {
       const utm = {};
+      if (!url) return utm;
+
       try {
         const parsed = new URL(url);
         parsed.searchParams.forEach((value, key) => {
@@ -79,33 +57,13 @@
           }
         });
       } catch {}
+
       return utm;
     }
 
-    const existingSession = log_traffic ? readSessionCookie() : null;
-
-    const sessionData = log_traffic
-      ? existingSession || {
-          landing_page: window.location.href,
-          referrer: document.referrer || null
-        }
-      : null;
-
-    // state
-    const buffer = [];
-    let datalayer_index_counter = 0;
-    let pageViewFired = false;
-    let pageHasKeyEvent = false;
-
-    const key_events = Array.isArray(settings.key_events)
-      ? settings.key_events.map(e => e?.event_name).filter(Boolean)
-      : [];
-
-    // helpers
     function shouldSkip(msg) {
       if (!msg) return true;
       if (msg?.[0] === "set") return true;
-      if (msg?.[0] === "consent") return true;
 
       if (msg?.event && msg.event.startsWith("gtm.")) {
         return msg.event !== "gtm.js";
@@ -138,10 +96,18 @@
       return cookies;
     }
 
+    // state
+    const buffer = [];
+    let datalayer_index_counter = 0;
+    let pageViewFired = false;
+    let pageHasKeyEvent = false;
+
+    const key_events = Array.isArray(settings.key_events)
+      ? settings.key_events.map(e => e?.event_name).filter(Boolean)
+      : [];
+
     // payload
     function buildEventPayload(event_name, data, isKeyEventFlag) {
-      const uniqueId = data?.["gtm.uniqueEventId"] ?? null;
-
       const payload = {
         event_name,
         service: "datalayer",
@@ -159,12 +125,20 @@
         datalayer: data
       };
 
-      if (log_traffic && sessionData?.landing_page) {
+      // session data from settings
+      if (
+        typeof settings.session_landing_page === "string" ||
+        typeof settings.session_referrer === "string"
+      ) {
         payload.session = {
-          landing_page: sessionData.landing_page,
-          referrer: sessionData.referrer,
-          ...parseUtmParams(sessionData.landing_page)
+          landing_page: settings.session_landing_page || null,
+          referrer: settings.session_referrer || null
         };
+
+        const utmParams = parseUtmParams(settings.session_landing_page);
+        Object.keys(utmParams).forEach(key => {
+          payload.session[key] = utmParams[key];
+        });
       }
 
       if (log_cookies) {
@@ -175,7 +149,8 @@
         payload.key_event = true;
       }
 
-      if (uniqueId !== null) {
+      const uniqueId = data?.["gtm.uniqueEventId"];
+      if (uniqueId != null) {
         payload.event_id = `${page_id}_${uniqueId}`;
       }
 
@@ -220,6 +195,7 @@
     function flush() {
       if (!buffer.length) return;
 
+      // transport gate
       const analyticsStorage =
         window.google_tag_data.ics.getConsentState("analytics_storage");
       const adStorage =
@@ -227,10 +203,6 @@
 
       if (analyticsStorage !== 1 || adStorage !== 1) {
         return;
-      }
-
-      if (log_traffic && sessionData) {
-        writeSessionCookie(sessionData);
       }
 
       if (sampling_enabled === true && pageHasKeyEvent === false) {
@@ -241,20 +213,22 @@
         sampling_enabled === true && pageHasKeyEvent === true;
 
       const consentState = window.gtm_consent_state || {};
+
       const payload = buffer
         .splice(0)
         .map(e => {
-           const uniqueId = e.datalayer?.["gtm.uniqueEventId"];
-           if (uniqueId != null) {
-             const consent = consentState[uniqueId];
-             if (consent) {
-                e.consent = consent;
-              }
+          const uniqueId = e.datalayer?.["gtm.uniqueEventId"];
+          if (uniqueId != null) {
+            const consent = consentState[uniqueId];
+            if (consent) {
+              e.consent = consent;
+            }
           }
-          
+
           if (isSampledSession) {
             e.sampled_session = true;
           }
+
           return JSON.stringify(e);
         })
         .join("\n");
