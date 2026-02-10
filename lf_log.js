@@ -62,6 +62,8 @@
     function shouldSkip(msg) {
       if (!msg) return true;
       if (msg?.[0] === "set") return true;
+      if (msg?.[0] === "get") return true;
+      if (msg?.[0] === "consent") return true;
 
       if (msg?.event && msg.event.startsWith("gtm.")) {
         return msg.event !== "gtm.js";
@@ -163,6 +165,17 @@
     }
 
     function queueEvent(dlEvent) {
+      // unwrap events sendt with datalayer push from inside GTM
+      if (
+        dlEvent &&
+        typeof dlEvent === "object" &&
+        dlEvent.value &&
+        typeof dlEvent.value === "object" &&
+        dlEvent.value["gtm.uniqueEventId"] != null
+      ) {
+      dlEvent = dlEvent.value;
+      }
+      
       if (shouldSkip(dlEvent)) return;
 
       datalayer_index_counter++;
