@@ -35,14 +35,24 @@
     }
 
     function readAllCookies() {
-      const cookies = {};
+      const cookies = {
+        cookie_values: {},
+        cookie_names: [],
+      };
+
       document.cookie.split("; ").forEach(c => {
         const idx = c.indexOf("=");
+
         if (idx > -1) {
-          cookies[c.substring(0, idx)] = c.substring(idx + 1);
+          const key = c.substring(0, idx);
+          const value = c.substring(idx + 1);
+
+          cookies.cookie_values[key] = value;
+          cookies.cookie_names.push(key);
         }
       });
-      return cookies;
+
+    return cookies;
     }
 
     function attachMissingDataLayers() {
