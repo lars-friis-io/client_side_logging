@@ -4,6 +4,12 @@
       console.error('datalayer log: "customer" or "token" is missing');
       return;
     }
+    
+    if (window.dataLayerLoggerStarted === true) {
+      return;
+    }
+
+    window.dataLayerLoggerStarted = true;
 
     const endpoint = "https://browser-intake-datadoghq.eu/api/v2/logs";
     const token = settings.token;
